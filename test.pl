@@ -95,6 +95,7 @@ sub test_file($)
     }
     #print "CODE\n$obj->{src}\nCODE\n";
 
+	#print "str=$str\n";
     $str =~ s/\s+//sg unless exists $dontparse{$test};
     if ( ! ok( $str, $check{$test} ) ) {
     	print "CODE\n$obj->{src}\nCODE\n";

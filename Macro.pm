@@ -14,7 +14,7 @@ use IO::File;
 our %cache;
 
 require 5.006;
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 use fields qw( filename path code src stack blocks switch_stack line subs for_sep );
 
@@ -233,18 +233,11 @@ sub parseSection($@)
                     unless exists $this->{subs}{$sub_name};
 
                 if ( $params ) {
-                    my @txt;
-                    for ( split( /(\#\#[\w\{\[\}\]]+\#\#)/, $params ) ) {
-                        my ( $var_name, $ref_data ) = /^\#\#(\w+)([\[\{][^\#]+)?\#\#$/;
-                        if ( $var_name ) {
-                            $ref_data = "" unless defined $ref_data;
-                            push @txt, "\$scope->{$var_name}$ref_data";
-                        } else {
-                            push @txt, $_;
-                        }
-                    }
-                    #push @{$this->{blocks}}, "{ local \$scope->{ARGV};\n\$scope->{ARGV} = [$params];";
-                    push @{$this->{blocks}}, "{ my \$save_argv = \$scope->{ARGV};\n\$scope->{ARGV} = [@txt];\n";
+                    no warnings;
+                    # pre-process cond
+                    $params =~ s/\#\#(\w+)([\[\{][^\#]+)?\#\#/\$scope->{$1}$2/gs;
+
+                    push @{$this->{blocks}}, "{ my \$save_argv = \$scope->{ARGV};\n\$scope->{ARGV} = [$params];\n";
                 }
 
                 $this->parseSection( @{$this->{subs}{$sub_name}} );
@@ -421,7 +414,7 @@ __END__
 
 =head1 TITLE
 
-Text::Macro 0.05
+Text::Macro 0.06
 
 =head1 FORWARD
 

@@ -1,5 +1,5 @@
 TITLE
-    Text::Macro 0.03
+    Text::Macro 0.06
 
 FORWARD
     This module is template facility who's focus is on generating code such
@@ -131,8 +131,8 @@ DESCRIPTION MACRO format
     ##cond_var## | #endif | #for ##list_var## | #endfor | #include file_name
     | #comment | #sub sub_name | #endsub | #callsub sub_name | #pre |
     #endpre | #switch ##var_name## | #case "value1", "value2".. | #default |
-    #endswitch). Some of the flow-control directives take a variable and
-    process on it. Non-recognized statements are passed as-is.
+    #endswitch | #set ). Some of the flow-control directives take a variable
+    and process on it. Non-recognized statements are passed as-is.
 
     The if/elsif/else/endif statements simply insert the contents of the
     hash-value into a perl "if ( $context->{$var_name} ) {" block, so
@@ -155,9 +155,25 @@ DESCRIPTION MACRO format
 
     The 'xxsub' routines are a sort of local include. They are good for
     extracting complex pieces out into separate blocks of
-    code/template-data. At the moment, no parameters may be passed. The
-    format is to declare a block with #sub {sub-name} / #endsub block, then
-    invoke it with #callsub {sub-name} just like an include statement.
+    code/template-data. You can append parameter data such as '#callsub foo
+    "val1", "val2"' which will set vars '##ARGV[0]""', etc. The format is to
+    declare a block with #sub {sub-name} / #endsub block, then invoke it
+    with #callsub {sub-name} just like an include statement. Note that
+    subroutines are not considered an independent context. For example:
+
+     #sub foo
+      test ##val##, ##ARGV[0]##
+     #end foo
+
+     #callsub foo "neat"
+
+    The 'set' statement allows the setting of substituion variables. The
+    format is "var=val....". The "var=" can not have space, but everything
+    after the '=' will be accepted until the end-of-line.. The value is
+    escaped and inserted into perl-quotes, so no code can be run from here.
+    Note, however, that setting a var affects the entire context. Example:
+
+     #set my_var=Today is a good day
 
     The 'pre' block passes values exactly as is (with no hash-substution).
     The only thing that it can't pass is #endpre. This could be good to pass
@@ -200,6 +216,8 @@ DESCRIPTION MACRO format
 BUGS / NOTES
     you can't declare a sub within a sub (and this includes an include).
     There are currently no plans to rectify this.
+
+    #for ##var##, and #switch ##var## can not make use of indexing/hashing.
 
 TODO
     Provide better error handling (getting there)
