@@ -13,7 +13,7 @@ use IO::File;
 our %cache;
 
 require 5.006;
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 use fields qw( filename path code src );
 
@@ -203,7 +203,9 @@ sub parse($)
                 my ($sub_name) = $cond =~ /(\w+)/;
                 compileErrot( "No sub-name", $line_block )
                     unless $sub_name;
+
                 my @sub_data = ();
+
                 # Gobble up the remainder of the sub for later use
                 for ( $line_idx++ ; $line_idx <= $#lines && ( ( $line = ($line_block = $lines[$line_idx])->[0] ) !~ /^\s*\#endsub/ ) ; $line_idx++ ) {
                     push @sub_data, $line_block;
@@ -213,7 +215,11 @@ sub parse($)
                 my ($sub_name) = $cond =~ /(\w+)/;
                 compileError( "No sub-name", $line_block )
                     unless $sub_name;
-                splice( @lines, $line_idx + 1, 0, @{$subs{$cond}} );
+
+                compileError( "sub-macro '$sub_name' not defined", $line_block )
+                    unless exists $subs{$sub_name};
+
+                splice( @lines, $line_idx + 1, 0, @{$subs{$sub_name}} );
             } elsif ( $cmd eq "for" ) {
                 my ($var) = $cond =~ /\#\#(\w+)\#\#/
                     or compileError( "No conditional", $line_block );
@@ -228,7 +234,8 @@ sub parse($)
   my \@loop_var = (exists \$scope->{$var} && ref(\$scope->{$var}) eq "ARRAY" ) ? \@{\$scope->{$var}} : ();
   my \$counter = 0;
   for my \$el ( \@loop_var ) \{
-    \$scope = defined(\$el) && ref(\$el) eq "HASH" ? \$el : {};
+    \$scope = defined(\$el) && ref(\$el) eq "HASH" ? { \%\$el } : {};
+    \@\$scope{ keys \%\$old_scope } = ( values \%\$old_scope );
     \$scope->{${var}_SIZE} = scalar \@loop_var;
     \$scope->{${var}_IDX} = ++\$counter;
     #\$scope->{${var}_COMMA} = \$counter == \@loop_var ? "" : ",";
@@ -351,7 +358,9 @@ __END__
 
 =pod
 
-=head1 TITLE Text::Macro
+=head1 TITLE
+
+Text::Macro 0.03
 
 =head1 FORWARD
 
@@ -463,7 +472,7 @@ Lines in the macro-file that begin with a '#directive' are flow-control statemen
 
 The if/elsif/else/endif statements simply insert the contents of the hash-value into a perl "if ( $context->{$var_name} ) {" block, so potentially complex statements can be achieved.  In general, however, the logic-computation should be pre-computed and simply provide a boolean flag.
 
-For "for"/"endfor" directives, the variable should be an array of hashes (technically an array-ref of hash-refs).  It will iterate over the array and update an index of the name "varname_IDX" (which can be used as a regular insertion variable). Other custom variables are "varname_SIZE" (which contains the max IDX value).  The context of the insertion variables will change to be the contents of the sub-hash.  This is important since variables of the previous scope are not available.  Any fields desired at this point should be duplicated in the setup process.
+For "for"/"endfor" directives, the variable should be an array of hashes (technically an array-ref of hash-refs).  It will iterate over the array and update an index of the name "varname_IDX" (which can be used as a regular insertion variable). Other custom variables are "varname_SIZE" (which contains the max IDX value).  The context of the insertion variables will change to be the contents of the sub-hash PLUS the contents of the enclosing hash.
 
 The include directive simply replaces that line with the contents of the file_name (exception if not found).  This is a recursive process.
 
@@ -474,11 +483,14 @@ The 'xxsub' routines are a sort of local include.  They are good for extracting 
 The 'pre' block passes values exactly as is (with no hash-substution).  The only thing that it can't pass is #endpre.  This could be good to pass perl-comments.
 
 The 'switch' / 'case' / 'default' blocks are merely for convinience and deviate from the c-language style.  In function they are readibility structures which get expanded out to:
+
  if ( ##cond_var## eq "case_value" ) {
  } elsif ( .. ) {
  } else {
  }
+
 Because of this, c-style break-statements and fall-throughs don't exist.  Further, in c, the comparison is between integers.  Here it is between strings (which _can_ work for numbers, so long as there's no stringification ambiguity.  Here is an example:
+
  #switch ##data_type##
  #case "boolean"
    Do somethign with boolean
@@ -489,6 +501,7 @@ Because of this, c-style break-statements and fall-throughs don't exist.  Furthe
  #endswitch
 
 If a line ends with "\\\n" (meaning back-slash followed by a carrage return), then the carrage return is stripped.  This is useful for hash-commands that would otherwise require carriage returns to be displayed.  For example:
+
  pre-text \
  #for ##var##
   data ##val##\
@@ -496,13 +509,11 @@ If a line ends with "\\\n" (meaning back-slash followed by a carrage return), th
  post-text
 
 
-=head1 BUGS
+=head1 BUGS / NOTES
 
-you can't declare a sub within a sub (and this includes an include)
+you can't declare a sub within a sub (and this includes an include).  There are currently no plans to rectify this.
 
 =head1 TODO
-
-Allow sub-contexts the access parent-contexts as defaults.  Currently considered too much overhead.
 
 Provide better error handling (getting there)
 

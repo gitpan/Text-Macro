@@ -1,5 +1,8 @@
 Revision history for Perl extension Text.
 
+0.03  Wed May 15 16:58:00 2002
+	- Removed include-within-sub viability.
+	- Added inherited scoping (w/in for-loops)
 0.01  Sat May 11 13:25:57 2002
 	- original version; created by h2xs 1.21 with options
 		-n Text -X

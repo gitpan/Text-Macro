@@ -14,7 +14,8 @@ BEGIN {
     my $num_tests = $#tests + 4;
     my $idx = 0;
     my %find_idx = map { ( $_, $idx++ ) } @tests;
-    my @todos = ("test_templates/sub_include.tmpl");
+    my @todos;
+    #@todos = ("test_templates/sub_include.tmpl");
     #print "$_ = $find_idx{$_}\n" for @todos;
 
 
@@ -85,6 +86,8 @@ sub test_file($)
         ok(0);
         return;
     }
+    #print "CODE\n$obj->{src}\nCODE\n";
+
     $str =~ s/\s+//sg unless exists $dontparse{$test};
     ok( $str, $check{$test} );
 } # end test_file

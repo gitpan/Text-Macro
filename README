@@ -1,5 +1,5 @@
-Text version 0.01
-=================
+TITLE
+    Text::Macro 0.03
 
 FORWARD
     This module is template facility who's focus is on generating code such
@@ -68,6 +68,8 @@ SYNOPSIS
             ]
         }, $fh );
 
+      my $str = $parse->toString( { .. } );
+
   Sample macro
 
      #sub pk_block
@@ -113,6 +115,10 @@ DESCRIPTION METHODS
     This is identical to print($) but redirects the output to the
     file-handle. It is assumed that IO::File is used.
 
+  $obj->toString( { subs vals } )
+
+    This method allows the rendered text to be directly captured.
+
 DESCRIPTION MACRO format
     Text is passed unmodified except for '#' pre-processor directives. The
     easiest format is the "##var_name##" directive which searches for a
@@ -139,9 +145,8 @@ DESCRIPTION MACRO format
     and update an index of the name "varname_IDX" (which can be used as a
     regular insertion variable). Other custom variables are "varname_SIZE"
     (which contains the max IDX value). The context of the insertion
-    variables will change to be the contents of the sub-hash. This is
-    important since variables of the previous scope are not available. Any
-    fields desired at this point should be duplicated in the setup process.
+    variables will change to be the contents of the sub-hash PLUS the
+    contents of the enclosing hash.
 
     The include directive simply replaces that line with the contents of the
     file_name (exception if not found). This is a recursive process.
@@ -160,25 +165,43 @@ DESCRIPTION MACRO format
 
     The 'switch' / 'case' / 'default' blocks are merely for convinience and
     deviate from the c-language style. In function they are readibility
-    structures which get expanded out to: if ( ##cond_var## eq "case_value"
-    ) { } elsif ( .. ) { } else { } Because of this, c-style
-    break-statements and fall-throughs don't exist. Further, in c, the
-    comparison is between integers. Here it is between strings (which _can_
-    work for numbers, so long as there's no stringification ambiguity. Here
-    is an example: #switch ##data_type## #case "boolean" Do somethign with
-    boolean #case "int", "integer" Do something with type integer #default
-    If neither of the above special cases, then do this #endswitch
+    structures which get expanded out to:
+
+     if ( ##cond_var## eq "case_value" ) {
+     } elsif ( .. ) {
+     } else {
+     }
+
+    Because of this, c-style break-statements and fall-throughs don't exist.
+    Further, in c, the comparison is between integers. Here it is between
+    strings (which _can_ work for numbers, so long as there's no
+    stringification ambiguity. Here is an example:
+
+     #switch ##data_type##
+     #case "boolean"
+       Do somethign with boolean
+     #case "int", "integer"
+       Do something with type integer
+     #default
+       If neither of the above special cases, then do this
+     #endswitch
 
     If a line ends with "\\\n" (meaning back-slash followed by a carrage
     return), then the carrage return is stripped. This is useful for
     hash-commands that would otherwise require carriage returns to be
-    displayed. For example: pre-text \ #for ##var## data ##val##\ #endfor
-    post-text
+    displayed. For example:
+
+     pre-text \
+     #for ##var##
+      data ##val##\
+     #endfor
+     post-text
+
+BUGS / NOTES
+    you can't declare a sub within a sub (and this includes an include).
+    There are currently no plans to rectify this.
 
 TODO
-    Allow sub-contexts the access parent-contexts as defaults. Currently
-    considered too much overhead.
-
     Provide better error handling (getting there)
 
     For performance enhancement, extract the hash-values into local
@@ -187,24 +210,6 @@ TODO
 
 SEE ALSO
 AUTHOR
-     maraist@udel.edu
-
-INSTALLATION
-
-To install this module type the following:
-
-   perl Makefile.PL
-   make
-   make test
-   make install
-
-DEPENDENCIES
-
-  None
-
-COPYRIGHT AND LICENCE
-
-Artistic lisence
-
-Copyright (C) 2002 Michael Maraist maraist@udel.edu
+     Artistic License
+     Copyright (C) 2002 Michael Maraist <maraist@udel.edu>
 
