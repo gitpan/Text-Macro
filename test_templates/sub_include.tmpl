@@ -1,0 +1,25 @@
+#sub sub1
+
+before include2
+#include include2.dat
+after include2
+
+before call sub3
+#call sub3
+after call sub3
+
+#end sub1
+
+#sub sub2
+
+before call sub1
+#callsub sub1
+after call sub1
+
+#endsub
+
+before call sub2
+#call sub2
+after call sub2
+
+done
