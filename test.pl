@@ -11,7 +11,7 @@ our @tests;
 BEGIN { 
     @tests = glob("test_templates/*.tmpl");
     # idx starts at 1, and test1 is for loading
-    my $num_tests = $#tests + 2;
+    my $num_tests = $#tests + 4;
     my $idx = 0;
     my %find_idx = map { ( $_, $idx++ ) } @tests;
     my @todos = ("test_templates/sub_include.tmpl");
@@ -34,6 +34,8 @@ ok(1); # If we made it this far, we're ok.
 #print "files: ", join( ", ", @tests ), "\n";
 
 our %dontparse = map { ($_,$_) } qw( text.tmpl );
+
+
 
 #get check-data
 #my @keys = keys %tests;
@@ -92,3 +94,58 @@ for my $key ( @tests )
     test_file( $key );
 }
 
+sub printTest
+{
+    print "print-test\n";
+    my $test = shift;
+    my $obj;
+    eval {
+        $obj = new Text::Macro path => 'test_templates/', file => $test or die "Couldn't parse file: $test";
+    }; if ( $@ ) {
+        print "Could not compile: $@\n"; ok(0); return;
+    }
+
+    eval {
+        $obj->print( {} );
+    }; if ( $@ ) {
+        print "Could not render: $@\n"; 
+        print "CODE\n$obj->{src}\nCODE\n";
+        ok(0);
+        return;
+    }
+    ok(1);
+}
+
+printTest("text.tmpl");
+
+pipeTest("text.tmpl");
+
+sub pipeTest
+{
+    my $test = shift;
+    print "pipe-test\n";
+    my $obj;
+    eval {
+        $obj = new Text::Macro path => 'test_templates/', file => $test or die "Couldn't parse file: $test";
+    }; if ( $@ ) {
+        print "Could not compile: $@\n"; ok(0); return;
+    }
+
+    my $str;
+    eval {
+        my $fname = "/tmp/test_$$";
+        my $fh = new IO::File ">$fname";
+        $obj->pipe( {}, $fh );
+        $fh->close();
+        $fh = new IO::File $fname;
+        $str = join( "", $fh->getlines() );
+        $fh->close();
+        unlink $fname;
+    }; if ( $@ ) {
+        print "Could not render: $@\n"; 
+        print "CODE\n$obj->{src}\nCODE\n";
+        ok(0);
+        return;
+    }
+    ok( $str, $check{$test} );
+}

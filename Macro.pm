@@ -13,7 +13,7 @@ use IO::File;
 our %cache;
 
 require 5.006;
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 use fields qw( filename path code src );
 
@@ -319,7 +319,8 @@ sub print($$) {
   my $data = shift;
   die "Compilation error"
       unless $this->{code};
-  $this->{code}->( $data, sub { print; });
+  no warnings;
+  $this->{code}->( $data, sub { print @_; });
 } # end print
 
 sub pipe($$$) {
@@ -329,8 +330,8 @@ sub pipe($$$) {
 
   die "Compilation error"
       unless $this->{code};
-
-  $this->{code}->( $data, sub { print $fh, @_;  } );
+  no warnings;
+  $this->{code}->( $data, sub { print $fh @_;  } );
 } # end pipe
 
 sub toString($$) {
@@ -339,6 +340,7 @@ sub toString($$) {
       unless $this->{code};
 
   my @contents; 
+  no warnings;
   $this->{code}->( $data, sub {  push @contents, @_; } );
   return join( "", @contents );
 } # end toString
