@@ -7,15 +7,16 @@
 
 package Text::Macro;
 use strict;
+use warnings;
 use integer;
 use IO::File;
 
 our %cache;
 
 require 5.006;
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
-use fields qw( filename path code src );
+use fields qw( filename path code src stack blocks switch_stack line subs for_sep );
 
 ########################################
 # Function: new
@@ -92,7 +93,7 @@ sub getTextBlock($)
     } else {
         $line_chunks = $_;
     }
-    
+
     return $line_chunks;
 } # end getTextBlock
 
@@ -115,6 +116,200 @@ sub concatText($$)
 } # end concatText
 
 ##################################################
+# Function: parseSection
+# Purpose:  convert the input blocks file into perl code
+# ToDo:     Make sure that the input is properly escaped
+##################################################
+sub parseSection($@)
+{
+    my Text::Macro $this = shift;
+    my @lines = @_;
+
+    for ( my $line_idx = 0; $line_idx <= $#lines ; $line_idx++ ) {
+        my $line_block = $lines[$line_idx];
+
+        my $line = $line_block->[0];
+
+        # Determine if we're a command
+        if ( my ( $cmd, $cond ) = $line =~ /
+            ^ \s*\#( if | for | elsif | else  | endif | endfor | comment | sub | callsub | pre | switch | case | endswitch | default | set )\b \s* (.*) \n $
+            /x ) {
+            # We are a command
+            if ( $cmd eq "if" ) {
+                compileError( "No if conditional", $line_block )
+                    unless $cond;
+
+                {
+                    no warnings;
+                    # pre-process cond
+                    $cond =~ s/\#\#(\w+)([\[\{][^\#]+)?\#\#/\$scope->{$1}$2/gs;
+                }
+
+                push @{$this->{blocks}}, "if ( $cond ) {\n";
+                push @{$this->{stack}}, "i";
+            } elsif ( $cmd eq "set" ) {
+                compileError( "No if conditional", $line_block )
+                    unless $cond;
+                my ( $var, $val ) = split( "=", $cond );
+                compileError( "Need a variable", $line_block )
+                    unless $var;
+                push @{$this->{blocks}}, "\$scope->{$var} = \"", quotemeta($val), "\";";
+            } elsif ( $cmd eq "switch" ) {
+                my ( $var ) = $cond =~ /\#\#(\w+)\#\#/;
+                compileError( "No switch argument", $line_block )
+                    unless $var;
+
+                push @{$this->{switch_stack}}, [ $var, 1 ];
+                push @{$this->{stack}}, "s";
+            } elsif ( $cmd eq "endswitch" ) {
+                compileError( "Exiting $this->{stack}[-1] when still in switch", $line_block )
+                    unless $this->{stack}[-1] eq "s" || $this->{stack}[-1] eq "d";
+                pop @{$this->{stack}};
+                push @{$this->{blocks}}, "}\n" unless $this->{switch_stack}[-1][1];
+                pop @{$this->{switch_stack}};
+            } elsif ( $cmd eq "case" ) {
+                my ( @syms ) = $cond =~ /(\"[^\"]+\")/g;
+                compileError( "No conditional value", $line_block )
+                    unless @syms;
+                compileError( "case with no switch", $line_block )
+                    unless @{$this->{switch_stack}};
+                my $switch_item = $this->{switch_stack}[-1];
+                my $sym_str = "(" . join( ') || (', map { "\$scope->{$switch_item->[0]} eq $_" } @syms ) . ")";
+                if ( $switch_item->[1] ) {
+                    push @{$this->{blocks}}, "if ( $sym_str ) {\n";
+                    $switch_item->[1] = 0;
+                } else {
+                    push @{$this->{blocks}}, "} elsif ( $sym_str ) {\n";
+                }
+            } elsif ( $cmd eq "default" ) {
+                compileError( "case with no switch", $line_block )
+                    unless @{$this->{switch_stack}};
+                my $switch_item = $this->{switch_stack}[-1];
+                if ( $switch_item->[1] ) {
+                } else {
+                    push @{$this->{blocks}}, "} else {\n";
+                }
+                $this->{stack}[-1] = "d";
+            } elsif ( $cmd eq "pre" ) {
+                my $line_chunks;
+                $line_chunks = getTextBlock($this->{blocks});
+                # Gobble up the remainder of the sub for later use
+                for ( $line_idx++ ; $line_idx <= $#lines && ( ( $line = ($line_block = $lines[$line_idx])->[0] ) !~ /^\s*\#endpre/ ) ; $line_idx++ ) {
+                    concatText( $line_chunks, $line );
+                }
+
+            } elsif ( $cmd eq "sub" ) {
+                my ($sub_name) = $cond =~ /(\w+)/;
+                compileErrot( "No sub-name", $line_block )
+                    unless $sub_name;
+
+                my @sub_data = ();
+
+                # Gobble up the remainder of the sub for later use
+                for ( $line_idx++ ;
+                      $line_idx <= $#lines && ( ( $line = ($line_block = $lines[$line_idx])->[0] ) !~ /^\s*\#endsub/ ) ;
+                      $line_idx++ ) {
+                    push @sub_data, $line_block;
+                }
+                $this->{subs}{$sub_name} = \@sub_data;
+            } elsif ( $cmd eq "callsub" ) {
+                my ($sub_name, $params) = $cond =~ /(\w+)\s*(\S.*)?/;
+                compileError( "No sub-name", $line_block )
+                    unless $sub_name;
+
+                compileError( "sub-macro '$sub_name' not defined", $line_block )
+                    unless exists $this->{subs}{$sub_name};
+
+                if ( $params ) {
+                    push @{$this->{blocks}}, "{ local \$scope->{ARGV};\n\$scope->{ARGV} = [$params];";
+                }
+                $this->parseSection( @{$this->{subs}{$sub_name}} );
+                if ( $params ) {
+                    push @{$this->{blocks}}, "\$scope->{ARGV} = [$params];\n}\n";
+                }
+            } elsif ( $cmd eq "for" ) {
+                my ($var) = $cond =~ /\#\#(\w+)\#\#/
+                    or compileError( "No conditional", $line_block );
+                $this->{for_sep} = "";
+                if ( $cond =~ /; sep="(.*?)"/ ) {
+                    $this->{for_sep} = "(\$counter == \@loop_var ? \"\" : \"$1\" )";
+                }
+                push @{$this->{stack}}, "f";
+                #ZZZ make size, idx, and comma exist only if used
+                push @{$this->{blocks}}, <<EOS;
+\{ my \$old_scope = \$scope;
+  my \@loop_var = (exists \$scope->{$var} && ref(\$scope->{$var}) eq "ARRAY" ) ? \@{\$scope->{$var}} : ();
+  my \$counter = 0;
+  for my \$el ( \@loop_var ) \{
+    \$scope = defined(\$el) && ref(\$el) eq "HASH" ? { \%\$el } : {};
+    \@\$scope{ keys \%\$old_scope } = ( values \%\$old_scope );
+    \$scope->{${var}_SIZE} = scalar \@loop_var;
+    \$scope->{${var}_IDX} = ++\$counter;
+
+EOS
+        } elsif ( $cmd eq "else" ) {
+            compileError( "else not level with if", $line_block )
+              unless $this->{stack}[ $#{$this->{stack}} ] eq "i";
+
+        $this->{stack}[ $#{$this->{stack}} ] = "e"; # pop/push
+        push @{$this->{blocks}}, "} else {\n";
+      } elsif ( $cmd eq "elsif" ) {
+        compileError( "No conditional", $line_block )
+          unless $cond;
+        compileError( "elsif not level with if", $line_block )
+          unless $this->{stack}[ $#{$this->{stack}} ] eq "i";
+
+        # pre-process cond
+        #Note that this searches for either ##var## or ##var[x][y]## or ##var{x}{y}##.
+        {
+            no warnings;
+            $cond =~ s/\#\#(\w+)([\[\{][^\#]+)?\#\#/\$scope->{$1}$2/sg;
+        }
+
+
+        push @{$this->{blocks}}, "} elsif ( $cond ) {\n";
+      } elsif ( $cmd eq "endif" ) {
+        $_ = $this->{stack}[ $#{$this->{stack}} ];
+        compileError( "endif not level with if", $line_block )
+          unless $_ eq "i" || $_ eq "e";
+        pop @{$this->{stack}};
+        push @{$this->{blocks}}, "}\n";
+      } elsif ( $cmd eq "endfor" ) {
+        compileError( "endfor not level with for", $line_block )
+          unless $this->{stack}[ $#{$this->{stack}} ] eq "f";
+        pop @{$this->{stack}};
+        if ( length $this->{for_sep} ) {
+            my $line_block = getTextBlock( $this->{blocks} );
+            push @$line_block, $this->{for_sep};
+            #concatText( $line_block, $for_sep );
+        }
+        push @{$this->{blocks}}, "}\n\$scope=\$old_scope;\n}\n";
+      } elsif ( $cmd eq "comment" ) {
+        # ignore line
+      } else {
+        compileError( "Invalid command state", $line_block );
+      }
+    } else { # if command
+        # We weren't a command
+        my $line_chunks = getTextBlock( $this->{blocks} );
+
+      # replace "##\w+[x]##" with a variable insertion point or raw text
+      for ( split( /(\#\#[\w\{\[\}\]]+\#\#)/, $line ) ) {
+          my ( $var_name, $ref_data ) = /^\#\#(\w+)([\[\{][^\#]+)?\#\#$/;
+          if ( $var_name ) {
+              $ref_data = "" unless defined $ref_data;
+              push @$line_chunks, "\$scope->{$var_name}$ref_data";
+          } else {
+              concatText( $line_chunks, $_ );
+          }
+      }
+    } # end else (not command)
+  } # end readlines
+
+} # end parseSection
+
+
+##################################################
 # Function: parse
 # Purpose:  convert the input template file into perl code
 # ToDo:     Make sure that the input is properly escaped
@@ -125,179 +320,19 @@ sub parse($)
 
     my @lines = $this->readFile( $this->{filename} );
 
-    my @blocks;
-    my @pre_blocks;
-    my @stack;
-    my @switch_stack;
-    my $line;
-    my %subs;
-    my $for_sep = "";
+    $this->{for_sep} = "";
+    $this->{blocks} = [];
+    $this->{stack} = [];
+    $this->{switch_stack} = [];
+    $this->{subs} = {};
 
-    #for my $line_block ( @lines ) {
-    for ( my $line_idx = 0; $line_idx <= $#lines ; $line_idx++ ) { 
-        my $line_block = $lines[$line_idx];
-
-        my $line = $line_block->[0];
-      
-        # Determine if we're a command
-        if ( my ( $cmd, $cond ) = $line =~ /
-            ^ \s*\#( if | for | elsif | else  | endif | endfor | comment | sub | callsub | pre | switch | case | endswitch | default ) \s* (.*) \n $
-            /x ) {
-            # We are a command
-            if ( $cmd eq "if" ) {
-                compileError( "No if conditional", $line_block )
-                    unless $cond;
-
-                # pre-process cond
-                $cond =~ s/\#\#(\w+)\#\#/\$scope->{$1}/g;
-
-                push @blocks, "if ( $cond ) {\n";
-                push @stack, "i";
-            } elsif ( $cmd eq "switch" ) {
-                my ( $var ) = $cond =~ /\#\#(\w+)\#\#/;
-                compileError( "No switch argument", $line_block )
-                    unless $var;
-
-                push @switch_stack, [ $var, 1 ];
-                push @stack, "s";
-            } elsif ( $cmd eq "endswitch" ) {
-                compileError( "Exiting $stack[-1] when still in switch", $line_block )
-                    unless $stack[-1] eq "s" || $stack[-1] eq "d";
-                pop @stack;
-                push @blocks, "}\n" unless $switch_stack[-1][1];
-                pop @switch_stack;
-            } elsif ( $cmd eq "case" ) {
-                my ( @syms ) = $cond =~ /(\"[^\"]+\")/g;
-                compileError( "No conditional value", $line_block )
-                    unless @syms;
-                compileError( "case with no switch", $line_block )
-                    unless @switch_stack;
-                my $switch_item = $switch_stack[-1];
-                my $sym_str = "(" . join( ') || (', map { "\$scope->{$switch_item->[0]} eq $_" } @syms ) . ")";
-                if ( $switch_item->[1] ) {
-                    push @blocks, "if ( $sym_str ) {\n";
-                    $switch_item->[1] = 0;
-                } else {
-                    push @blocks, "} elsif ( $sym_str ) {\n";
-                }
-            } elsif ( $cmd eq "default" ) {
-                compileError( "case with no switch", $line_block )
-                    unless @switch_stack;
-                my $switch_item = $switch_stack[-1];
-                if ( $switch_item->[1] ) {
-                    #push @blocks, "{\n";
-                    #$switch_item->[1] = 0;
-                } else {
-                    push @blocks, "} else {\n";
-                }
-                $stack[-1] = "d";
-            } elsif ( $cmd eq "pre" ) {
-                my $line_chunks;
-                $line_chunks = getTextBlock(\@blocks);
-                # Gobble up the remainder of the sub for later use
-                for ( $line_idx++ ; $line_idx <= $#lines && ( ( $line = ($line_block = $lines[$line_idx])->[0] ) !~ /^\s*\#endpre/ ) ; $line_idx++ ) {
-                    concatText( $line_chunks, $line );
-                } 
-            
-            } elsif ( $cmd eq "sub" ) {
-                my ($sub_name) = $cond =~ /(\w+)/;
-                compileErrot( "No sub-name", $line_block )
-                    unless $sub_name;
-
-                my @sub_data = ();
-
-                # Gobble up the remainder of the sub for later use
-                for ( $line_idx++ ; $line_idx <= $#lines && ( ( $line = ($line_block = $lines[$line_idx])->[0] ) !~ /^\s*\#endsub/ ) ; $line_idx++ ) {
-                    push @sub_data, $line_block;
-                } 
-                $subs{$sub_name} = \@sub_data;
-            } elsif ( $cmd eq "callsub" ) {
-                my ($sub_name) = $cond =~ /(\w+)/;
-                compileError( "No sub-name", $line_block )
-                    unless $sub_name;
-
-                compileError( "sub-macro '$sub_name' not defined", $line_block )
-                    unless exists $subs{$sub_name};
-
-                splice( @lines, $line_idx + 1, 0, @{$subs{$sub_name}} );
-            } elsif ( $cmd eq "for" ) {
-                my ($var) = $cond =~ /\#\#(\w+)\#\#/
-                    or compileError( "No conditional", $line_block );
-                $for_sep = "";
-                if ( $cond =~ /; sep="(.*?)"/ ) {
-                    $for_sep = "(\$counter == \@loop_var ? \"\" : \"$1\" )";
-                }
-                push @stack, "f";
-                #ZZZ make size, idx, and comma exist only if used
-                push @blocks, <<EOS;
-\{ my \$old_scope = \$scope;
-  my \@loop_var = (exists \$scope->{$var} && ref(\$scope->{$var}) eq "ARRAY" ) ? \@{\$scope->{$var}} : ();
-  my \$counter = 0;
-  for my \$el ( \@loop_var ) \{
-    \$scope = defined(\$el) && ref(\$el) eq "HASH" ? { \%\$el } : {};
-    \@\$scope{ keys \%\$old_scope } = ( values \%\$old_scope );
-    \$scope->{${var}_SIZE} = scalar \@loop_var;
-    \$scope->{${var}_IDX} = ++\$counter;
-    #\$scope->{${var}_COMMA} = \$counter == \@loop_var ? "" : ",";
-
-EOS
-        } elsif ( $cmd eq "else" ) {
-            compileError( "else not level with if", $line_block )
-              unless $stack[ $#stack ] eq "i";
-
-        $stack[ $#stack ] = "e"; # pop/push
-        push @blocks, "} else {\n";
-      } elsif ( $cmd eq "elsif" ) {
-        compileError( "No conditional", $line_block )
-          unless $cond;
-        compileError( "elsif not level with if", $line_block )
-          unless $stack[ $#stack ] eq "i";
-
-        # pre-process cond
-        $cond =~ s/\#\#(\w+)\#\#/\$scope->{$1}/g;
-
-        push @blocks, "} elsif ( $cond ) {\n";
-      } elsif ( $cmd eq "endif" ) {
-        $_ = $stack[ $#stack ];
-        compileError( "endif not level with if", $line_block )
-          unless $_ eq "i" || $_ eq "e";
-        pop @stack;
-        push @blocks, "}\n";
-      } elsif ( $cmd eq "endfor" ) {
-        compileError( "endfor not level with for", $line_block )
-          unless $stack[ $#stack ] eq "f";
-        pop @stack;
-        if ( $for_sep ) {
-            my $line_block = getTextBlock( \@blocks );
-            push @$line_block, $for_sep;
-            #concatText( $line_block, $for_sep );
-        }
-        push @blocks, "}\n\$scope=\$old_scope;\n}\n";
-      } elsif ( $cmd eq "comment" ) {
-        # ignore line
-      } else {
-        compileError( "Invalid command state", $line_block );
-      }
-    } else { # if command
-      # We weren't a command
-        my $line_chunks = getTextBlock( \@blocks );
-
-      # replace "##\w+##" with a variable insertion point or raw text
-      for ( split( /(\#\#\w+\#\#)/, $line ) ) {
-        if ( /^\#\#(\w+)\#\#$/ ) {
-          push @$line_chunks, "\$scope->{$1}";
-        } else {
-            concatText( $line_chunks, $_ );
-        }
-      } 
-    } # end else (not command)
-  } # end readlines
+    $this->parseSection( @lines );
 
     die "stack not unraveled at end of input"
-        if @stack;
+        if @{$this->{stack}};
 
     # Convert text-chunks to print statements
-    for my $block ( @blocks ) {
+    for my $block ( @{$this->{blocks}} ) {
         if ( ref( $block ) eq "ARRAY" ) {
             for( @$block ) {
                 s!\\\n!!;
@@ -306,16 +341,17 @@ EOS
         }
     }
 
-  my @code = ( 
-              "sub {\nno warnings;\nmy \$scope = shift;\nmy \$fh = shift;\n",
-              @blocks,
-              "};\n"
-             );
-  my $src = "@code";
-  $this->{src} = $src;
-  my $code = eval $src;
+    my @code = ( 
+                "sub {\nno warnings;\nmy \$tmp = shift; my \$scope = { \%\$tmp };\nmy \$fh = shift;\n",
+                @{$this->{blocks}},
+                "};\n"
+               );
+    my $src = "@code";
+    $this->{src} = $src;
+    #print "CODE{$this->{src}\nCODE}\n";
+    my $code = eval $src;
 
-  $this->{code} = $code;
+    $this->{code} = $code;
 } # end parse
 
 ########################################
@@ -343,6 +379,7 @@ sub pipe($$$) {
 
 sub toString($$) {
   my ( $this, $data ) = @_;
+
   die "Compilation error"
       unless $this->{code};
 
@@ -360,7 +397,7 @@ __END__
 
 =head1 TITLE
 
-Text::Macro 0.03
+Text::Macro 0.04
 
 =head1 FORWARD
 
@@ -468,7 +505,7 @@ This method allows the rendered text to be directly captured.
 
 Text is passed unmodified except for '#' pre-processor directives.  The easiest format is the "##var_name##" directive which searches for a context hash-value with the appropriate hash-key name.  In the outer scope, the context is the passed hash-ref keys/values.  Within a for-loop, the context changes as described below.
 
-Lines in the macro-file that begin with a '#directive' are flow-control statements.  Valid statements are ( #if ##cond_var## | #else | #elsif ##cond_var## | #endif | #for ##list_var## | #endfor | #include file_name | #comment | #sub sub_name | #endsub | #callsub sub_name | #pre | #endpre | #switch ##var_name## | #case "value1", "value2".. | #default | #endswitch).  Some of the flow-control directives take a variable and process on it.  Non-recognized statements are passed as-is.
+Lines in the macro-file that begin with a '#directive' are flow-control statements.  Valid statements are ( #if ##cond_var## | #else | #elsif ##cond_var## | #endif | #for ##list_var## | #endfor | #include file_name | #comment | #sub sub_name | #endsub | #callsub sub_name | #pre | #endpre | #switch ##var_name## | #case "value1", "value2".. | #default | #endswitch | #set ).  Some of the flow-control directives take a variable and process on it.  Non-recognized statements are passed as-is.
 
 The if/elsif/else/endif statements simply insert the contents of the hash-value into a perl "if ( $context->{$var_name} ) {" block, so potentially complex statements can be achieved.  In general, however, the logic-computation should be pre-computed and simply provide a boolean flag.
 
@@ -478,7 +515,17 @@ The include directive simply replaces that line with the contents of the file_na
 
 The 'comment' directive simply ignores that line
 
-The 'xxsub' routines are a sort of local include.  They are good for extracting complex pieces out into separate blocks of code/template-data.  At the moment, no parameters may be passed.  The format is to declare a block with #sub {sub-name} / #endsub block, then invoke it with #callsub {sub-name} just like an include statement.
+The 'xxsub' routines are a sort of local include.  They are good for extracting complex pieces out into separate blocks of code/template-data. You can append parameter data such as '#callsub foo "val1", "val2"' which will set vars '##ARGV[0]""', etc.   The format is to declare a block with #sub {sub-name} / #endsub block, then invoke it with #callsub {sub-name} just like an include statement.  Note that subroutines are not considered an independent context.  For example:
+
+ #sub foo
+  test ##val##, ##ARGV[0]##
+ #end foo
+
+ #callsub foo "neat"
+
+The 'set' statement allows the setting of substituion variables. The format is "var=val....".  The "var=" can not have space, but everything after the '=' will be accepted until the end-of-line.. The value is escaped and inserted into perl-quotes, so no code can be run from here.  Note, however, that setting a var affects the entire context.  Example:
+
+ #set my_var=Today is a good day
 
 The 'pre' block passes values exactly as is (with no hash-substution).  The only thing that it can't pass is #endpre.  This could be good to pass perl-comments.
 
@@ -512,6 +559,8 @@ If a line ends with "\\\n" (meaning back-slash followed by a carrage return), th
 =head1 BUGS / NOTES
 
 you can't declare a sub within a sub (and this includes an include).  There are currently no plans to rectify this.
+
+#for ##var##, and #switch ##var## can not make use of indexing/hashing.
 
 =head1 TODO
 

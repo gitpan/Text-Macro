@@ -64,7 +64,12 @@ sub test_file($)
     my ( $obj, $str );
     eval {
     $obj = new Text::Macro path => 'test_templates/', file => $test or die "Couldn't parse file: $test";
-    }; if ( $@ ) { print "Could not compile: $@\n"; ok(0); return }
+    }; if ( $@ ) { 
+		print "Could not compile: $@\n";
+        #print "CODE{\n$obj->{src}\n}CODE\n";
+	 	ok(0);
+		return;
+	 }
 
     eval {
         $str  = $obj->toString( 
@@ -79,10 +84,12 @@ sub test_file($)
                 { a => 5, b => 6 },
             ],
             value => 'dog',
+			my_array => [ qw( zero one two three ) ],
+			my_hash => { qw( key1 val1 key2 val2 ), complex => [ 0, 1, 2 ] },
         } );
     }; if ( $@ ) { 
         print "Could not render: $@\n"; 
-        print "CODE\n$obj->{src}\nCODE\n";
+        print "CODE{\n$obj->{src}\n}CODE\n";
         ok(0);
         return;
     }

@@ -1,5 +1,10 @@
 Revision history for Perl extension Text.
 
+0.04  Fri May 17
+    - Added the "set" command: #set foo val....
+    - Added Array/Hash substitution values ##foo[id]##, ##foo{id}##
+    - Added parameters to invoked sub's; added ##ARG[id]##
+
 0.03  Wed May 15 16:58:00 2002
 	- Removed include-within-sub viability.
 	- Added inherited scoping (w/in for-loops)
