@@ -96,7 +96,9 @@ sub test_file($)
     #print "CODE\n$obj->{src}\nCODE\n";
 
     $str =~ s/\s+//sg unless exists $dontparse{$test};
-    ok( $str, $check{$test} );
+    if ( ! ok( $str, $check{$test} ) ) {
+    	print "CODE\n$obj->{src}\nCODE\n";
+	}
 } # end test_file
 
 for my $key ( @tests )

@@ -1,5 +1,7 @@
 Revision history for Perl extension Text.
 
+0.05  Fri May 17
+	- Applied var-substitution to set, callsub commands.
 0.04  Fri May 17
     - Added the "set" command: #set foo val....
     - Added Array/Hash substitution values ##foo[id]##, ##foo{id}##

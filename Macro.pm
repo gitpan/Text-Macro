@@ -14,7 +14,7 @@ use IO::File;
 our %cache;
 
 require 5.006;
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 use fields qw( filename path code src stack blocks switch_stack line subs for_sep );
 
@@ -147,13 +147,25 @@ sub parseSection($@)
 
                 push @{$this->{blocks}}, "if ( $cond ) {\n";
                 push @{$this->{stack}}, "i";
+                next;
             } elsif ( $cmd eq "set" ) {
                 compileError( "No if conditional", $line_block )
                     unless $cond;
                 my ( $var, $val ) = split( "=", $cond );
                 compileError( "Need a variable", $line_block )
                     unless $var;
-                push @{$this->{blocks}}, "\$scope->{$var} = \"", quotemeta($val), "\";";
+
+                my @txt;
+                for ( split( /(\#\#[\w\{\[\}\]]+\#\#)/, $val ) ) {
+                    my ( $var_name, $ref_data ) = /^\#\#(\w+)([\[\{][^\#]+)?\#\#$/;
+                    if ( $var_name ) {
+                        $ref_data = "" unless defined $ref_data;
+                        push @txt, "\$scope->{$var_name}$ref_data";
+                    } else {
+                        push @txt, '"' . quotemeta( $_ ) . '"';
+                    }
+                }
+                push @{$this->{blocks}}, "\$scope->{$var} = ", join( " . ", @txt ) ,";";
             } elsif ( $cmd eq "switch" ) {
                 my ( $var ) = $cond =~ /\#\#(\w+)\#\#/;
                 compileError( "No switch argument", $line_block )
@@ -221,11 +233,23 @@ sub parseSection($@)
                     unless exists $this->{subs}{$sub_name};
 
                 if ( $params ) {
-                    push @{$this->{blocks}}, "{ local \$scope->{ARGV};\n\$scope->{ARGV} = [$params];";
+                    my @txt;
+                    for ( split( /(\#\#[\w\{\[\}\]]+\#\#)/, $params ) ) {
+                        my ( $var_name, $ref_data ) = /^\#\#(\w+)([\[\{][^\#]+)?\#\#$/;
+                        if ( $var_name ) {
+                            $ref_data = "" unless defined $ref_data;
+                            push @txt, "\$scope->{$var_name}$ref_data";
+                        } else {
+                            push @txt, $_;
+                        }
+                    }
+                    #push @{$this->{blocks}}, "{ local \$scope->{ARGV};\n\$scope->{ARGV} = [$params];";
+                    push @{$this->{blocks}}, "{ my \$save_argv = \$scope->{ARGV};\n\$scope->{ARGV} = [@txt];\n";
                 }
+
                 $this->parseSection( @{$this->{subs}{$sub_name}} );
                 if ( $params ) {
-                    push @{$this->{blocks}}, "\$scope->{ARGV} = [$params];\n}\n";
+                    push @{$this->{blocks}}, "\n\$scope->{ARGV} = \$save_argv;\n}\n";
                 }
             } elsif ( $cmd eq "for" ) {
                 my ($var) = $cond =~ /\#\#(\w+)\#\#/
@@ -397,7 +421,7 @@ __END__
 
 =head1 TITLE
 
-Text::Macro 0.04
+Text::Macro 0.05
 
 =head1 FORWARD
 
