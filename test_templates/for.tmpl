@@ -11,3 +11,9 @@ line1
 line2
 #endfor
 
+#for ##nested_for_block##; sep=","
+	a = ##a##
+    #for ##s##; sep=";"
+		a = ##a##
+    #endfor
+#endfor

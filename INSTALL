@@ -9,4 +9,4 @@ To install this module type the following:
 
 DEPENDENCIES
 IO::File
-perl 5.06
+perl 5.07

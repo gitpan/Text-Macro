@@ -1,5 +1,9 @@
 Revision history for Perl extension Text.
 
+0.07  Mon Jun 03
+	- Fixed bug where nested for loops shared separators
+    - Fixed bug where nested for loops overwrite outer-loop variables
+    - Added toFile({},'file_name') method
 0.06  Fri May 17
 	- Removed an extra space erroneously inserted on callsub interpolations.
 0.05  Fri May 17

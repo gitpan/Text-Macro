@@ -11,12 +11,10 @@ our @tests;
 BEGIN { 
     @tests = glob("test_templates/*.tmpl");
     # idx starts at 1, and test1 is for loading
-    my $num_tests = $#tests + 4;
+    my $num_tests = $#tests + 5;
     my $idx = 0;
     my %find_idx = map { ( $_, $idx++ ) } @tests;
     my @todos;
-    #@todos = ("test_templates/sub_include.tmpl");
-    #print "$_ = $find_idx{$_}\n" for @todos;
 
 
     # we add 2 similarly to above
@@ -39,7 +37,6 @@ our %dontparse = map { ($_,$_) } qw( text.tmpl );
 
 
 #get check-data
-#my @keys = keys %tests;
 our %check;
 for my $key ( @tests )
 {
@@ -57,7 +54,21 @@ for my $key ( @tests )
 
 #print "files: ", join(", ", @tests ), "\n";
 
-sub test_file($)
+for my $key ( @tests )
+{
+    testFile( $key );
+}
+
+
+printTest("text.tmpl");
+
+pipeTest("text.tmpl");
+
+toFileTest("text.tmpl");
+
+# ------------------------------
+
+sub testFile($)
 {
     my ( $test ) = @_;
     print "Testing file $test\n";
@@ -83,6 +94,11 @@ sub test_file($)
                 { a => 3, b => 4 },
                 { a => 5, b => 6 },
             ],
+			nested_for_block =>
+			[
+				{ a => 1, s => [ { a => 2 }, { a => 3 } ] },
+				{ a => 4, s => [ { a => 5 }, { a => 6 } ] },
+			],
             value => 'dog',
 			my_array => [ qw( zero one two three ) ],
 			my_hash => { qw( key1 val1 key2 val2 ), complex => [ 0, 1, 2 ] },
@@ -100,12 +116,8 @@ sub test_file($)
     if ( ! ok( $str, $check{$test} ) ) {
     	print "CODE\n$obj->{src}\nCODE\n";
 	}
-} # end test_file
+} # end testFile
 
-for my $key ( @tests )
-{
-    test_file( $key );
-}
 
 sub printTest
 {
@@ -127,11 +139,8 @@ sub printTest
         return;
     }
     ok(1);
-}
+} # end printTest
 
-printTest("text.tmpl");
-
-pipeTest("text.tmpl");
 
 sub pipeTest
 {
@@ -161,4 +170,33 @@ sub pipeTest
         return;
     }
     ok( $str, $check{$test} );
-}
+} # end pipeTest
+
+sub toFileTest
+{
+    my $test = shift;
+    print "pipe-test\n";
+    my $obj;
+    eval {
+        $obj = new Text::Macro path => 'test_templates/', file => $test or die "Couldn't parse file: $test";
+    }; if ( $@ ) {
+        print "Could not compile: $@\n"; ok(0); return;
+    }
+
+    my $str;
+    eval {
+        my $fname = "/tmp/test_$$";
+        $obj->toFile( {}, $fname );
+
+        my $fh = new IO::File $fname;
+        $str = join( "", $fh->getlines() );
+        $fh->close();
+        unlink $fname;
+    }; if ( $@ ) {
+        print "Could not render: $@\n"; 
+        print "CODE\n$obj->{src}\nCODE\n";
+        ok(0);
+        return;
+    }
+    ok( $str, $check{$test} );
+} # end toFileTest

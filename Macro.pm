@@ -14,7 +14,7 @@ use IO::File;
 our %cache;
 
 require 5.006;
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 
 use fields qw( filename path code src stack blocks switch_stack line subs for_sep );
 
@@ -247,9 +247,11 @@ sub parseSection($@)
             } elsif ( $cmd eq "for" ) {
                 my ($var) = $cond =~ /\#\#(\w+)\#\#/
                     or compileError( "No conditional", $line_block );
-                $this->{for_sep} = "";
+                #$this->{for_sep} = "";
                 if ( $cond =~ /; sep="(.*?)"/ ) {
-                    $this->{for_sep} = "(\$counter == \@loop_var ? \"\" : \"$1\" )";
+                    push @{$this->{for_sep}}, "(\$counter == \@loop_var ? \"\" : \"$1\" )";
+                } else {
+                    push @{$this->{for_sep}}, "";
                 }
                 push @{$this->{stack}}, "f";
                 #ZZZ make size, idx, and comma exist only if used
@@ -259,7 +261,9 @@ sub parseSection($@)
   my \$counter = 0;
   for my \$el ( \@loop_var ) \{
     \$scope = defined(\$el) && ref(\$el) eq "HASH" ? { \%\$el } : {};
-    \@\$scope{ keys \%\$old_scope } = ( values \%\$old_scope );
+    for my \$scope_name ( grep { !exists \$scope->{ \$_ } } keys \%\$old_scope ) {
+        \$scope->{ \$scope_name } = \$old_scope->{ \$scope_name };
+    }
     \$scope->{${var}_SIZE} = scalar \@loop_var;
     \$scope->{${var}_IDX} = ++\$counter;
 
@@ -295,12 +299,13 @@ EOS
         compileError( "endfor not level with for", $line_block )
           unless $this->{stack}[ $#{$this->{stack}} ] eq "f";
         pop @{$this->{stack}};
-        if ( length $this->{for_sep} ) {
+        if ( length $this->{for_sep}[-1] ) {
             my $line_block = getTextBlock( $this->{blocks} );
-            push @$line_block, $this->{for_sep};
+            push @$line_block, $this->{for_sep}[-1];
             #concatText( $line_block, $for_sep );
         }
         push @{$this->{blocks}}, "}\n\$scope=\$old_scope;\n}\n";
+        pop @{$this->{for_sep}};
       } elsif ( $cmd eq "comment" ) {
         # ignore line
       } else {
@@ -337,7 +342,7 @@ sub parse($)
 
     my @lines = $this->readFile( $this->{filename} );
 
-    $this->{for_sep} = "";
+    $this->{for_sep} = [];
     $this->{blocks} = [];
     $this->{stack} = [];
     $this->{switch_stack} = [];
@@ -394,6 +399,19 @@ sub pipe($$$) {
   $this->{code}->( $data, sub { print $fh @_;  } );
 } # end pipe
 
+sub toFile($$$) {
+    my Text::Macro $this = shift;
+    my $data = shift;
+    my $file_name = shift;
+
+    my $fh = new IO::File ">$file_name"
+        or die "Could not open file: $file_name";
+
+    $this->pipe( $data, $fh );
+
+    $fh->close();
+} # end toFile
+
 sub toString($$) {
   my ( $this, $data ) = @_;
 
@@ -414,7 +432,7 @@ __END__
 
 =head1 TITLE
 
-Text::Macro 0.06
+Text::Macro 0.07
 
 =head1 FORWARD
 
@@ -514,9 +532,13 @@ This runs the macro, substituting the values specified in the input hash paramet
 
 This is identical to print($) but redirects the output to the file-handle.  It is assumed that IO::File is used.
 
+=head2 $obj->toFile( { subs vals }, $file_name )
+
+This is a wrapper around pipe which simply creates a file.
+
 =head2 $obj->toString( { subs vals } )
 
-This method allows the rendered text to be directly captured.
+This method allows the rendered text to be directly captured.  It returns the generated string.
 
 =head1 DESCRIPTION MACRO format
 
